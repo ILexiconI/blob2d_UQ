@@ -228,10 +228,10 @@ def define_params(paramFile=None):
                 "width": {"type": "float", "min": 0.03, "max": 0.15, "default": 0.09},# Blob width
         }
         vary = {
-                "Te0": cp.Uniform(2.5, 7.5),
-                "n0": cp.Uniform(1.0e+18, 4.0e+18),
-                "D_vort": cp.Uniform(1.0e-7, 1.0e-5),
-                "D_n": cp.Uniform(1.0e-7, 1.0e-5),
+                #"Te0": cp.Uniform(2.5, 7.5),
+                #"n0": cp.Uniform(1.0e+18, 4.0e+18),
+                #"D_vort": cp.Uniform(1.0e-7, 1.0e-5),
+                #"D_n": cp.Uniform(1.0e-7, 1.0e-5),
                 "height": cp.Uniform(0.25, 0.75),
                 "width": cp.Uniform(0.03, 0.15)
         }# Try latin hypercube?
@@ -280,7 +280,7 @@ def setup_campaign(params, output_columns, template):
             target_filename='BOUT.inp')
     
     # Create executor - 50+ timesteps should be resonable (higher np?)
-    execute = ExecuteLocal(f'nice -n 11 mpirun -np 16 {os.getcwd()}/blob2d -d ./ nout=3 -q -q -q ')
+    execute = ExecuteLocal(f'nice -n 11 mpirun -np 32 {os.getcwd()}/blob2d -d ./ nout=4 -q -q -q')
     
     # Create decoder
     decoder = B2dDecoder(
@@ -291,7 +291,7 @@ def setup_campaign(params, output_columns, template):
     if os.path.exists('outfiles')==0: os.mkdir('outfiles')
     actions = Actions(CreateRunDirectory('outfiles'), Encode(encoder), execute, Decode(decoder))
     campaign = uq.Campaign(
-            name='MAIN-RUN',
+            name='ASV',#MAIN-RUN
             #db_location="sqlite:///" + os.getcwd() + "/campaign.db",
             work_dir='outfiles',
             params=params,
@@ -323,23 +323,38 @@ def run_campaign(campaign, sampler):
     campaign.set_sampler(sampler)
     campaign.execute().collate(progress_bar=True)
 
-def refine_campaign(campaign, sampler, output_columns):
-    # Create analysis class
+def get_analysis(campaign, sampler, output_columns):
     frame = campaign.get_collation_result()
     analysis = uq.analysis.SCAnalysis(sampler=sampler, qoi_cols=output_columns)
-    
-    # Run analysis
     campaign.apply_analysis(analysis)
+    analysis.save_state(f"{campaign.campaign_dir}/analysis.state")
+    
+    print(frame)
     print(analysis.l_norm)
     
-    atRefs = refine_to_precision(campaign, sampler, analysis, 'avgTransp', 0.01, 10)
-    mlRefs = refine_to_precision(campaign, sampler, analysis, 'massLoss', 0.01, 10)
+    return analysis
+
+def load_analysis(campaign, sampler, output_columns):
+    #frame = campaign.campaign_db.get_results("ASV", 1, iteration=-1)#.get_last_analysis()
+    analysis = uq.analysis.SCAnalysis(sampler=sampler, qoi_cols=output_columns)
+    analysis.load_state(f"{campaign.campaign_dir}/analysis.state")
+    #campaign.apply_analysis(analysis)
+    
+    #print(frame)
+    #print(analysis.l_norm)
+    
+    return analysis
+
+def refine_campaign(campaign, sampler, analysis, output_columns):
+
+    atRefs = refine_to_precision(campaign, sampler, analysis, 'avgTransp', 0.01, 3)
+    mlRefs = 0#refine_to_precision(campaign, sampler, analysis, 'massLoss', 0.01, 1)
     campaign.apply_analysis(analysis)
     print(analysis.l_norm)
     
     return [atRefs, mlRefs]
 
-def analyse_campaign(campaign, sampler, output_columns):
+def analyse_campaign(campaign, sampler, analysis, output_columns):
     """
     Runs a set of analyses on a provided campaign, details often change by commit.
     
@@ -356,33 +371,42 @@ def analyse_campaign(campaign, sampler, output_columns):
     -------
     None - results either printed to screen, plotted or saved to a file.
     """
+    
+    print("Analysis start")
     # Create analysis class
-    frame = campaign.get_collation_result()
+    #frame = campaign.get_collation_result()
+    frame = campaign.campaign_db.get_results("ASV", 1, iteration=-1)#"MAIN-RUN"
+    
     #analysis = uq.analysis.SCAnalysis(sampler=sampler, qoi_cols=output_columns)
+    #analysis = frame.get_last_analysis(frame) or with no parameter?
+    #campaign.apply_analysis(analysis)
+    
+    pprint(campaign.list_runs())
+    print(frame)
+    print(analysis.l_norm)
     
     # Run analysis
-    results = campaign.get_last_analysis()
-    analysis = results
-    print(analysis.l_norm)
+    #results = frame.get_last_analysis()
+    #analysis = results
     
     # Print mean and variation of quantity and get adaptation errors
     #results = analysis.analyse(frame)
-    print(f'Mean transport rate = {results.describe("avgTransp", "mean")}')
-    print(f'Standard deviation = {results.describe("avgTransp", "std")}')
-    print(f'Mean mass loss = {results.describe("massLoss", "mean")}')
-    print(f'Standard deviation = {results.describe("massLoss", "std")}')
-    analysis.get_adaptation_errors()
+    #print(f'Mean transport rate = {results.describe("avgTransp", "mean")}')
+    #print(f'Standard deviation = {results.describe("avgTransp", "std")}')
+    #print(f'Mean mass loss = {results.describe("massLoss", "mean")}')
+    #print(f'Standard deviation = {results.describe("massLoss", "std")}')
+    #analysis.get_adaptation_errors()
     
     # Get Sobol indices (online for loop automatically creates a list without having to append)
-    params = sampler.vary.get_keys()# This is also used in plot_sobols
-    sobols = [results._get_sobols_first('avgTransp', param) for param in params]
-    print(sobols)
+    #params = sampler.vary.get_keys()# This is also used in plot_sobols
+    #sobols = [results._get_sobols_first('avgTransp', param) for param in params]
+    #print(sobols)
     
     # Plot Analysis
     analysis.adaptation_table()
-    analysis.adaptation_histogram()
-    analysis.get_adaptation_errors()
-    plot_sobols(params, sobols)
+    #analysis.adaptation_histogram()
+    #analysis.get_adaptation_errors()
+    #plot_sobols(params, sobols)
 
 ###############################################################################
 
@@ -392,22 +416,27 @@ def main():
         campaign = setup_campaign(params, output_columns, template)
         sampler = setup_sampler(vary)
         run_campaign(campaign, sampler)
-        refine_campaign(campaign, sampler, output_columns)
+        analysis = get_analysis(campaign, sampler, output_columns)
+        refinements = refine_campaign(campaign, sampler, analysis, output_columns)
+        analysis.save_state(f"{campaign.campaign_dir}/analysis.state")
+        np.savetxt('refinements.txt', np.asarray(refinements))
     else:
-        campaign = uq.Campaign(
-                name='reloaded',
-                db_location="sqlite:///" + "outfiles/campaign.db")
+        campaign = uq.Campaign(#########################################Put lower functions into try/except loops
+                name='ASV',# This must match the name of the campaign being loaded
+                db_location="sqlite:///" + "outfiles/ASVd061p8v9/campaign.db")
                 #sc_adaptivezwu_8u7h
+        
         sampler = campaign.get_active_sampler()
-        campaign.set_sampler(sampler)##################################################
+        campaign.set_sampler(sampler, update=True)################################################## Needed?
+        analysis = load_analysis(campaign, sampler, output_columns)
+        #analysis = x.get_last_analysis()
+        
+        #campaign.apply_analysis(frame)
     
-    pprint(campaign.list_runs())
-    #refinements = refine_campaign()
-    #np.savetxt('refinements.txt', np.asarray(refinements))
-    
-    analyse_campaign(campaign, sampler, output_columns)
+    analyse_campaign(campaign, sampler, analysis, output_columns)
     
     print("Campaign run & analysed successfuly")
+    print(campaign.campaign_dir)
 
 if __name__ == "__main__":
     main()
