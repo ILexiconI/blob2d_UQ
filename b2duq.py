@@ -12,8 +12,6 @@ import os
 import matplotlib.pyplot as plt
 from easyvvuq.actions import CreateRunDirectory, Encode, Decode, ExecuteLocal, Actions
 from pprint import pprint
-from shutil import rmtree
-import pickle
 
 from easyvvuq import OutputType
 from xbout import open_boutdataset
@@ -28,6 +26,8 @@ class B2dDecoder:
         Name of blob2d output file to be decoded.
     ouput_columns (list)
         List of output quantities to considered by the campaign
+    output_type (OutputType object)
+        Easyvvuq object describing format of data returned by decoder
     """
     
     def __init__(self, target_filename, output_columns):
@@ -86,13 +86,6 @@ class B2dDecoder:
         blobInfo = {"maxV": maxV, "maxX": maxX, "avgTransp": avgTransp, "massLoss": massLoss, "peaked": peaked}
         return blobInfo
     
-    def show_out_options():
-        print("""Possible outputs:
-            maxV: the maximum major radial CoM velocity achieved by the blob
-            maxX: the distance the blob propagates before disintegration
-            avgTransp: the average rate of transport of the blob (i.e. flux) over its lifetime
-            massLoss: the ratio of blob mass at disintegration to initial blob mass""")
-    
     def parse_sim_output(self, run_info={}):
         """
         Parses a BOUT.dmp.*.nc file from the output of blob2d and converts it to the EasyVVUQ
@@ -148,10 +141,26 @@ def refine_sampling_plan(number_of_refinements, campaign, sampler, analysis, par
         data_frame = campaign.get_collation_result()
         analysis.adapt_dimension(param, data_frame)#, method='var')
 
-def refine_to_precision(campaign, sampler, analysis, param, tol, maxrefs):
+def refine_to_precision(campaign, sampler, analysis, param, tol, minrefs, maxrefs):
     """
     Refines the sampling with respect to an output variable until the adaptation
     error on that variable is below a certain tolerance
+    
+    Parameters
+    ----------
+    campaign, sampler & analysis
+        Easyvvuq objects containing their respective class info
+    param
+        The parameter we are refining with respect to
+    tol
+        The maximum desired megnitude of adaptation error we want after refinement
+    maxrefs
+        Maximum allowed number of refinements
+
+    Returns
+    -------
+    counter
+        The number of refinements used
     """
     
     counter = 0
@@ -178,19 +187,6 @@ def plot_sobols(params, sobols):
     plt.tight_layout()
     plt.savefig("Sobols.png")
     #plt.show()
-
-def save_campaign(filename, campaign, sampler, output_columns):
-    with open(filename, 'wb') as handle:
-        cpnData = [campaign, sampler, output_columns]
-        pickle.dump(cpnData, handle)
-
-def load_campaign(filename):
-    with open(filename, 'rb') as handle:
-        cpnData = pickle.load(handle)
-        campaign = cpnData[0]
-        sampler = cpnData[1]
-        output_columns = cpnData[2]
-    return campaign, sampler, output_columns
             
 ###############################################################################
 
@@ -210,10 +206,7 @@ def define_params(paramFile=None):
     vary (dict)
         Dictionary of uncertain parameters and their distributions.
     output_columns (list)
-        List of the quantities extracted by the decoder we want to return.
-        Options:
-            maxV: the maximum major radial CoM velocity achieved by the blob
-            maxX: the distance the blob propagates before disintegration
+        List of the quantities extracted by the decoder which we want to return.
     template (str)
         Filename of the template to be used.
     """
@@ -234,14 +227,8 @@ def define_params(paramFile=None):
                 #"D_n": cp.Uniform(1.0e-7, 1.0e-5),
                 "height": cp.Uniform(0.25, 0.75),
                 "width": cp.Uniform(0.03, 0.15)
-        }# Try latin hypercube?
-        
-        #output_columns = ["avgTransp", "massLoss"]
+        }
         output_columns = ["maxV", "maxX", "avgTransp", "massLoss"]
-        # Show user available and selected output options
-        B2dDecoder.show_out_options()
-        print("Options selected: ", output_columns, "\n")
-        
         template = 'b2d.template'
         
         return params, vary, output_columns, template
@@ -280,7 +267,7 @@ def setup_campaign(params, output_columns, template):
             target_filename='BOUT.inp')
     
     # Create executor - 50+ timesteps should be resonable (higher np?)
-    execute = ExecuteLocal(f'nice -n 11 mpirun -np 32 {os.getcwd()}/blob2d -d ./ nout=4 -q -q -q')
+    execute = ExecuteLocal(f'nice -n 11 mpirun -np 32 {os.getcwd()}/blob2d -d ./ nout=3 -q -q -q')
     
     # Create decoder
     decoder = B2dDecoder(
@@ -291,7 +278,7 @@ def setup_campaign(params, output_columns, template):
     if os.path.exists('outfiles')==0: os.mkdir('outfiles')
     actions = Actions(CreateRunDirectory('outfiles'), Encode(encoder), execute, Decode(decoder))
     campaign = uq.Campaign(
-            name='ASV',#MAIN-RUN
+            name='test',
             #db_location="sqlite:///" + os.getcwd() + "/campaign.db",
             work_dir='outfiles',
             params=params,
@@ -299,9 +286,11 @@ def setup_campaign(params, output_columns, template):
     
     return campaign
 
-def setup_sampler(vary):
+def setup_sampler(campaign, vary):
     """
-    Creates and returns an easyvvuq sampler object with the uncertain parameters from vary.
+    Creates and returns an easyvvuq sampler object for an adaptive dimension stochastic
+    collocation campaign using the uncertain parameters from vary, then applies it to
+    the campaign object
     """
     
     sampler = uq.sampling.SCSampler(
@@ -312,18 +301,16 @@ def setup_sampler(vary):
             growth=True,
             midpoint_level1=True,
             dimension_adaptive=True)
+    campaign.set_sampler(sampler)
     
     return sampler
 
-def run_campaign(campaign, sampler):
+def get_analysis(campaign, sampler, output_columns):
     """
-    Runs a campaign using provided sampler.
+    Creates, saves and returns the analysis class which will be used on the campaign
     """
     
-    campaign.set_sampler(sampler)
-    campaign.execute().collate(progress_bar=True)
-
-def get_analysis(campaign, sampler, output_columns):
+    
     frame = campaign.get_collation_result()
     analysis = uq.analysis.SCAnalysis(sampler=sampler, qoi_cols=output_columns)
     campaign.apply_analysis(analysis)
@@ -335,6 +322,10 @@ def get_analysis(campaign, sampler, output_columns):
     return analysis
 
 def load_analysis(campaign, sampler, output_columns):
+    """
+    Loads and returns the analysis class from a previous campaign
+    """
+    
     #frame = campaign.campaign_db.get_results("ASV", 1, iteration=-1)#.get_last_analysis()
     analysis = uq.analysis.SCAnalysis(sampler=sampler, qoi_cols=output_columns)
     analysis.load_state(f"{campaign.campaign_dir}/analysis.state")
@@ -346,11 +337,14 @@ def load_analysis(campaign, sampler, output_columns):
     return analysis
 
 def refine_campaign(campaign, sampler, analysis, output_columns):
+    """
+    Refines a campaign according to hardcoded parameters and returns an array with
+    the number of refinements applied to each variable
+    """
 
-    atRefs = refine_to_precision(campaign, sampler, analysis, 'avgTransp', 0.01, 3)
-    mlRefs = 0#refine_to_precision(campaign, sampler, analysis, 'massLoss', 0.01, 1)
+    atRefs = refine_to_precision(campaign, sampler, analysis, 'avgTransp', 0.1, 1, 1)
+    mlRefs = 1#refine_to_precision(campaign, sampler, analysis, 'massLoss', 0.1, 3, 10)
     campaign.apply_analysis(analysis)
-    print(analysis.l_norm)
     
     return [atRefs, mlRefs]
 
@@ -360,10 +354,8 @@ def analyse_campaign(campaign, sampler, analysis, output_columns):
     
     Parameters
     ----------
-    campaign (easyvvuq Campaign object)
-        The campaign being analysed
-    sampler (easyvvuq SCSampler object)
-        The sampler being used
+    campaign, sampler & analysis
+        Easyvvuq objects containing their respective class info
     output_columns (dict)
         List of output quantities under consideration
 
@@ -375,7 +367,7 @@ def analyse_campaign(campaign, sampler, analysis, output_columns):
     print("Analysis start")
     # Create analysis class
     #frame = campaign.get_collation_result()
-    frame = campaign.campaign_db.get_results("ASV", 1, iteration=-1)#"MAIN-RUN"
+    frame = campaign.campaign_db.get_results("test", 1, iteration=-1)#"MAIN-RUN"
     
     #analysis = uq.analysis.SCAnalysis(sampler=sampler, qoi_cols=output_columns)
     #analysis = frame.get_last_analysis(frame) or with no parameter?
@@ -403,7 +395,7 @@ def analyse_campaign(campaign, sampler, analysis, output_columns):
     #print(sobols)
     
     # Plot Analysis
-    analysis.adaptation_table()
+    #analysis.adaptation_table()
     #analysis.adaptation_histogram()
     #analysis.get_adaptation_errors()
     #plot_sobols(params, sobols)
@@ -412,22 +404,22 @@ def analyse_campaign(campaign, sampler, analysis, output_columns):
 
 def main():
     params, vary, output_columns, template = define_params()
-    if 0:
+    if 1:
         campaign = setup_campaign(params, output_columns, template)
-        sampler = setup_sampler(vary)
-        run_campaign(campaign, sampler)
+        sampler = setup_sampler(campaign, vary)
+        campaign.execute().collate(progress_bar=True)
         analysis = get_analysis(campaign, sampler, output_columns)
         refinements = refine_campaign(campaign, sampler, analysis, output_columns)
         analysis.save_state(f"{campaign.campaign_dir}/analysis.state")
         np.savetxt('refinements.txt', np.asarray(refinements))
     else:
-        campaign = uq.Campaign(#########################################Put lower functions into try/except loops
-                name='ASV',# This must match the name of the campaign being loaded
-                db_location="sqlite:///" + "outfiles/ASVd061p8v9/campaign.db")
+        campaign = uq.Campaign(###############Put lower functions into try/except loops
+                name='****',# This must match the name of the campaign being loaded
+                db_location="sqlite:///" + "outfiles/****/campaign.db")
                 #sc_adaptivezwu_8u7h
         
         sampler = campaign.get_active_sampler()
-        campaign.set_sampler(sampler, update=True)################################################## Needed?
+        campaign.set_sampler(sampler, update=True)######################## Needed?
         analysis = load_analysis(campaign, sampler, output_columns)
         #analysis = x.get_last_analysis()
         
