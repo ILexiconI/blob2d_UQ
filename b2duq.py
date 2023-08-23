@@ -165,7 +165,7 @@ def refine_to_precision(campaign, sampler, analysis, param, tol, minrefs, maxref
     
     counter = 0
     error = 1
-    while error > tol and counter < maxrefs:
+    while counter < minrefs or (error > tol and counter < maxrefs):
         refine_sampling_plan(1, campaign, sampler, analysis, param)
         counter += 1
         error = analysis.get_adaptation_errors()[-1]
@@ -373,7 +373,6 @@ def analyse_campaign(campaign, sampler, analysis, output_columns):
     #analysis = frame.get_last_analysis(frame) or with no parameter?
     #campaign.apply_analysis(analysis)
     
-    pprint(campaign.list_runs())
     print(frame)
     print(analysis.l_norm)
     
