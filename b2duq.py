@@ -411,10 +411,7 @@ def main():
         analysis.save_state(f"{campaign.campaign_dir}/analysis.state")
         np.savetxt('refinements.txt', np.asarray(refinements))
     else:
-        campaign = uq.Campaign(###############Put lower functions into try/except loops
-                name='****',# This must match the name of the campaign being loaded
-                db_location="sqlite:///" + "outfiles/****/campaign.db")
-        
+        campaign = uq.Campaign(name='NAME', db_location="sqlite:///" + "outfiles/NAME****/campaign.db")
         sampler = campaign.get_active_sampler()
         campaign.set_sampler(sampler, update=True)######################## Needed?
         analysis = load_analysis(campaign, sampler, output_columns)
