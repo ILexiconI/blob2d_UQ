@@ -172,6 +172,7 @@ def refine_to_precision(campaign, sampler, analysis, param, tol, minrefs, maxref
         refine_sampling_plan(1, campaign, sampler, analysis, param)
         counter += 1
         error = analysis.get_adaptation_errors()[-1] / analysis.samples[param][0]
+        print(param, " iteration ", counter)
         print(param, "error: ", error)
     return counter
 
@@ -224,10 +225,10 @@ def define_params(paramFile=None):
                 "width": {"type": "float", "min": 0.03, "max": 0.15, "default": 0.09},# Blob width
         }
         vary = {
-                #"Te0": cp.Uniform(2.5, 7.5),
-                #"n0": cp.Uniform(1.0e+18, 4.0e+18),
-                #"D_vort": cp.Uniform(1.0e-7, 1.0e-5),
-                #"D_n": cp.Uniform(1.0e-7, 1.0e-5),
+                "Te0": cp.Uniform(2.5, 7.5),
+                "n0": cp.Uniform(1.0e+18, 4.0e+18),
+                "D_vort": cp.Uniform(1.0e-7, 1.0e-5),
+                "D_n": cp.Uniform(1.0e-7, 1.0e-5),
                 "height": cp.Uniform(0.25, 0.75),
                 "width": cp.Uniform(0.03, 0.15)
         }
@@ -270,7 +271,7 @@ def setup_campaign(params, output_columns, template):
             target_filename='BOUT.inp')
     
     # Create executor - 50+ timesteps should be resonable (higher np?)
-    execute = ExecuteLocal(f'nice -n 11 mpirun -np 32 {os.getcwd()}/blob2d -d ./ nout=3 -q -q -q')
+    execute = ExecuteLocal(f'nice -n 11 mpirun -np 32 {os.getcwd()}/blob2d -d ./ nout=60 -q -q -q')
     
     # Create decoder
     decoder = B2dDecoder(
@@ -281,7 +282,7 @@ def setup_campaign(params, output_columns, template):
     if os.path.exists('outfiles')==0: os.mkdir('outfiles')
     actions = Actions(CreateRunDirectory('outfiles'), Encode(encoder), execute, Decode(decoder))
     campaign = uq.Campaign(
-            name='test',
+            name='FullSim',
             #db_location="sqlite:///" + os.getcwd() + "/campaign.db",
             work_dir='outfiles',
             params=params,
@@ -340,8 +341,8 @@ def refine_campaign(campaign, sampler, analysis, output_columns):
     the number of refinements applied to each variable
     """
 
-    atRefs = refine_to_precision(campaign, sampler, analysis, 'avgTransp', 0.05, 1, 1)
-    mlRefs = 1#refine_to_precision(campaign, sampler, analysis, 'massLoss', 0.05, 3, 10)
+    atRefs = refine_to_precision(campaign, sampler, analysis, 'avgTransp', 0.05, 3, 10)
+    mlRefs = refine_to_precision(campaign, sampler, analysis, 'massLoss', 0.05, 3, 10)
     campaign.apply_analysis(analysis)
     
     return [atRefs, mlRefs]
@@ -365,7 +366,7 @@ def analyse_campaign(campaign, sampler, analysis, output_columns):
     print("Analysis start")
     # Create analysis class
     #frame = campaign.get_collation_result()
-    frame = campaign.campaign_db.get_results("test", 1, iteration=-1)#"MAIN-RUN"
+    frame = campaign.campaign_db.get_results("FullSim", 1, iteration=-1)#"MAIN-RUN"
     
     #analysis = uq.analysis.SCAnalysis(sampler=sampler, qoi_cols=output_columns)
     #analysis = frame.get_last_analysis(frame) or with no parameter?
