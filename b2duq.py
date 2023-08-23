@@ -143,8 +143,11 @@ def refine_sampling_plan(number_of_refinements, campaign, sampler, analysis, par
 
 def refine_to_precision(campaign, sampler, analysis, param, tol, minrefs, maxrefs):
     """
-    Refines the sampling with respect to an output variable until the adaptation
-    error on that variable is below a certain tolerance
+    Refines the sampling with respect to an output variable until the error on that
+    variable is below a certain tolerance.  The error is a sort of normalised 
+    hierarchical surplus error but not the absolute error, calculated by dividing
+    the largest hierarchical surplus error of the admitted set by the initial value
+    of the parameter in question.
     
     Parameters
     ----------
@@ -168,7 +171,7 @@ def refine_to_precision(campaign, sampler, analysis, param, tol, minrefs, maxref
     while counter < minrefs or (error > tol and counter < maxrefs):
         refine_sampling_plan(1, campaign, sampler, analysis, param)
         counter += 1
-        error = analysis.get_adaptation_errors()[-1]
+        error = analysis.get_adaptation_errors()[-1] / analysis.samples[param][0]
         print(param, "error: ", error)
     return counter
 
@@ -326,13 +329,8 @@ def load_analysis(campaign, sampler, output_columns):
     Loads and returns the analysis class from a previous campaign
     """
     
-    #frame = campaign.campaign_db.get_results("ASV", 1, iteration=-1)#.get_last_analysis()
     analysis = uq.analysis.SCAnalysis(sampler=sampler, qoi_cols=output_columns)
     analysis.load_state(f"{campaign.campaign_dir}/analysis.state")
-    #campaign.apply_analysis(analysis)
-    
-    #print(frame)
-    #print(analysis.l_norm)
     
     return analysis
 
@@ -342,8 +340,8 @@ def refine_campaign(campaign, sampler, analysis, output_columns):
     the number of refinements applied to each variable
     """
 
-    atRefs = refine_to_precision(campaign, sampler, analysis, 'avgTransp', 0.1, 1, 1)
-    mlRefs = 1#refine_to_precision(campaign, sampler, analysis, 'massLoss', 0.1, 3, 10)
+    atRefs = refine_to_precision(campaign, sampler, analysis, 'avgTransp', 0.05, 1, 1)
+    mlRefs = 1#refine_to_precision(campaign, sampler, analysis, 'massLoss', 0.05, 3, 10)
     campaign.apply_analysis(analysis)
     
     return [atRefs, mlRefs]
@@ -372,7 +370,7 @@ def analyse_campaign(campaign, sampler, analysis, output_columns):
     #analysis = uq.analysis.SCAnalysis(sampler=sampler, qoi_cols=output_columns)
     #analysis = frame.get_last_analysis(frame) or with no parameter?
     #campaign.apply_analysis(analysis)
-    
+        
     print(frame)
     print(analysis.l_norm)
     
@@ -415,14 +413,10 @@ def main():
         campaign = uq.Campaign(###############Put lower functions into try/except loops
                 name='****',# This must match the name of the campaign being loaded
                 db_location="sqlite:///" + "outfiles/****/campaign.db")
-                #sc_adaptivezwu_8u7h
         
         sampler = campaign.get_active_sampler()
         campaign.set_sampler(sampler, update=True)######################## Needed?
         analysis = load_analysis(campaign, sampler, output_columns)
-        #analysis = x.get_last_analysis()
-        
-        #campaign.apply_analysis(frame)
     
     analyse_campaign(campaign, sampler, analysis, output_columns)
     
