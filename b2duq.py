@@ -173,7 +173,7 @@ def refine_to_precision(campaign, sampler, analysis, param, tol, minrefs, maxref
         counter += 1
         error = analysis.get_adaptation_errors()[-1] / analysis.samples[param][0]
         print(param, " iteration ", counter)
-        print(param, "error: ", error)
+        print(param, "error: ", error)  
     return counter
 
 def plot_sobols(params, sobols):
@@ -337,15 +337,14 @@ def load_analysis(campaign, sampler, output_columns):
 
 def refine_campaign(campaign, sampler, analysis, output_columns):
     """
-    Refines a campaign according to hardcoded parameters and returns an array with
-    the number of refinements applied to each variable
+    Refines a campaign according to hardcoded parameters and saves the number of
+    refinements to a file.
     """
 
-    atRefs = refine_to_precision(campaign, sampler, analysis, 'avgTransp', 0.05, 3, 10)
-    mlRefs = refine_to_precision(campaign, sampler, analysis, 'massLoss', 0.05, 3, 10)
+    atRefs = refine_to_precision(campaign, sampler, analysis, 'avgTransp', 0.01, 1, 10)
+    mlRefs = refine_to_precision(campaign, sampler, analysis, 'massLoss', 0.01, 1, 10)
     campaign.apply_analysis(analysis)
-    
-    return [atRefs, mlRefs]
+    np.savetxt('refinements.txt', np.asarray([atRefs, mlRefs]))
 
 def analyse_campaign(campaign, sampler, analysis, output_columns):
     """
@@ -364,23 +363,14 @@ def analyse_campaign(campaign, sampler, analysis, output_columns):
     """
     
     print("Analysis start")
-    # Create analysis class
-    #frame = campaign.get_collation_result()
-    frame = campaign.campaign_db.get_results("FullSim", 1, iteration=-1)#"MAIN-RUN"
-    
-    #analysis = uq.analysis.SCAnalysis(sampler=sampler, qoi_cols=output_columns)
-    #analysis = frame.get_last_analysis(frame) or with no parameter?
-    #campaign.apply_analysis(analysis)
+    frame = campaign.campaign_db.get_results("FullSim", 1, iteration=-1)
+    results = analysis.analyse(frame)
         
     print(frame)
-    print(analysis.l_norm)
-    
-    # Run analysis
-    #results = frame.get_last_analysis()
-    #analysis = results
+    print(analysis.l_norm)    
+    print(analysis.get_adaptation_errors())
     
     # Print mean and variation of quantity and get adaptation errors
-    #results = analysis.analyse(frame)
     #print(f'Mean transport rate = {results.describe("avgTransp", "mean")}')
     #print(f'Standard deviation = {results.describe("avgTransp", "std")}')
     #print(f'Mean mass loss = {results.describe("massLoss", "mean")}')
@@ -388,33 +378,36 @@ def analyse_campaign(campaign, sampler, analysis, output_columns):
     #analysis.get_adaptation_errors()
     
     # Get Sobol indices (online for loop automatically creates a list without having to append)
-    #params = sampler.vary.get_keys()# This is also used in plot_sobols
-    #sobols = [results._get_sobols_first('avgTransp', param) for param in params]
-    #print(sobols)
+    params = sampler.vary.get_keys()# This is also used in plot_sobols
+    sobols = [results._get_sobols_first('avgTransp', param) for param in params]
+    print(sobols)
     
     # Plot Analysis
-    #analysis.adaptation_table()
+    analysis.adaptation_table()
     #analysis.adaptation_histogram()
     #analysis.get_adaptation_errors()
-    #plot_sobols(params, sobols)
+    plot_sobols(params, sobols)
 
 ###############################################################################
 
 def main():
     params, vary, output_columns, template = define_params()
-    if 1:
+    if 0:
         campaign = setup_campaign(params, output_columns, template)
         sampler = setup_sampler(campaign, vary)
         campaign.execute().collate(progress_bar=True)
         analysis = get_analysis(campaign, sampler, output_columns)
-        refinements = refine_campaign(campaign, sampler, analysis, output_columns)
+        refine_campaign(campaign, sampler, analysis, output_columns)
         analysis.save_state(f"{campaign.campaign_dir}/analysis.state")
-        np.savetxt('refinements.txt', np.asarray(refinements))
     else:
-        campaign = uq.Campaign(name='NAME', db_location="sqlite:///" + "outfiles/NAME****/campaign.db")
+        campaign = uq.Campaign(name='FullSim', db_location="sqlite:///" + "outfiles/FullSim99d7jlfm/campaign.db")
         sampler = campaign.get_active_sampler()
-        campaign.set_sampler(sampler, update=True)######################## Needed?
+        campaign.set_sampler(sampler, update=True)
         analysis = load_analysis(campaign, sampler, output_columns)
+        
+        # Refine campaign further if neccecary
+        #refine_campaign(campaign, sampler, analysis, output_columns)
+        #analysis.save_state(f"{campaign.campaign_dir}/analysis.state")
     
     analyse_campaign(campaign, sampler, analysis, output_columns)
     
