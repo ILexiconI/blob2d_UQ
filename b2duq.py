@@ -191,6 +191,21 @@ def plot_sobols(params, sobols):
     plt.tight_layout()
     plt.savefig("Sobols.png")
     #plt.show()
+
+def plot_sampling(sampler, analysis):
+    fig = plt.figure(figsize=[12,4])
+    ax1 = fig.add_subplot(131, xlim=[2.4, 7.6], ylim=[0.9e+18, 4.1e+18], xlabel='Te0', ylabel='n0', title='(Te0, n0) plane')
+    ax2 = fig.add_subplot(132, xlim=[0, 1.01e-5], ylim=[0, 1.01e-5], xlabel='D_vort', ylabel='D_n', title='(D_vort, D_n) plane')
+    ax3 = fig.add_subplot(133, xlim=[0.24, 0.76], ylim=[0.025, 0.155], xlabel='height', ylabel='width', title='(height, width) plane')
+    #ax3 = fig.add_subplot(133, xlim=[-0.05, 1.05], ylim=[-0.05, 1.05], xlabel='x19', ylabel='x20', title='(x19, x20) plane')
+    
+    accepted_grid = sampler.generate_grid(analysis.l_norm)
+    ax1.plot(accepted_grid[:,0], accepted_grid[:,1], 'o')
+    ax2.plot(accepted_grid[:,2], accepted_grid[:,3], 'o')
+    ax3.plot(accepted_grid[:,4], accepted_grid[:,5], 'o')
+    
+    plt.tight_layout()
+    plt.show()
             
 ###############################################################################
 
@@ -341,8 +356,8 @@ def refine_campaign(campaign, sampler, analysis, output_columns):
     refinements to a file.
     """
 
-    atRefs = refine_to_precision(campaign, sampler, analysis, 'avgTransp', 0.01, 1, 10)
-    mlRefs = refine_to_precision(campaign, sampler, analysis, 'massLoss', 0.01, 1, 10)
+    atRefs = refine_to_precision(campaign, sampler, analysis, 'maxV', 0.01, 5, 10)
+    mlRefs = refine_to_precision(campaign, sampler, analysis, 'maxX', 0.01, 5, 10)
     campaign.apply_analysis(analysis)
     np.savetxt('refinements.txt', np.asarray([atRefs, mlRefs]))
 
@@ -366,9 +381,11 @@ def analyse_campaign(campaign, sampler, analysis, output_columns):
     frame = campaign.campaign_db.get_results("FullSim", 1, iteration=-1)
     results = analysis.analyse(frame)
         
-    print(frame)
-    print(analysis.l_norm)    
-    print(analysis.get_adaptation_errors())
+    #print(frame)#.to_string())
+    #print(analysis.l_norm)
+    #print(analysis.get_adaptation_errors())
+
+    #print("Surrogate: ", analysis.surrogate("avgTransp", np.array([7.5e+00, 2.5e+18, 5.05e-06, 5.05e-06, 5.0e-01, 3.4567228e-02])))
     
     # Print mean and variation of quantity and get adaptation errors
     #print(f'Mean transport rate = {results.describe("avgTransp", "mean")}')
@@ -379,20 +396,27 @@ def analyse_campaign(campaign, sampler, analysis, output_columns):
     
     # Get Sobol indices (online for loop automatically creates a list without having to append)
     params = sampler.vary.get_keys()# This is also used in plot_sobols
-    sobols = [results._get_sobols_first('avgTransp', param) for param in params]
-    print(sobols)
+    #sobols = [results._get_sobols_first('maxV', param) for param in params]
+    sobols = analysis.get_sobol_indices('maxX')#, typ='all')
+    pprint(sobols)
+    
+    analysis.merge_accepted_and_admissible()
+    frame = campaign.get_collation_result()
+    results = analysis.analyse(frame)
     
     # Plot Analysis
-    analysis.adaptation_table()
+    #plot_sampling(sampler, analysis)
+    #analysis.adaptation_table()
     #analysis.adaptation_histogram()
     #analysis.get_adaptation_errors()
-    plot_sobols(params, sobols)
+    #plot_sobols(params, sobols)
+    #plt.show()
 
 ###############################################################################
 
 def main():
     params, vary, output_columns, template = define_params()
-    if 0:
+    if 1:
         campaign = setup_campaign(params, output_columns, template)
         sampler = setup_sampler(campaign, vary)
         campaign.execute().collate(progress_bar=True)
