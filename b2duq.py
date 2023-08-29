@@ -10,6 +10,8 @@ import numpy as np
 import chaospy as cp
 import os
 import matplotlib.pyplot as plt
+from matplotlib import cm
+from matplotlib.ticker import LinearLocator
 from easyvvuq.actions import CreateRunDirectory, Encode, Decode, ExecuteLocal, Actions
 from pprint import pprint
 
@@ -168,7 +170,7 @@ def refine_to_precision(campaign, sampler, analysis, param, tol, minrefs, maxref
     
     counter = 0
     error = 1
-    while counter < minrefs or (error > tol and counter < maxrefs):
+    while counter < minrefs or (error > tol and counter <= maxrefs):
         refine_sampling_plan(1, campaign, sampler, analysis, param)
         counter += 1
         error = analysis.get_adaptation_errors()[-1] / analysis.samples[param][0]
@@ -197,7 +199,6 @@ def plot_sampling(sampler, analysis):
     ax1 = fig.add_subplot(131, xlim=[2.4, 7.6], ylim=[0.9e+18, 4.1e+18], xlabel='Te0', ylabel='n0', title='(Te0, n0) plane')
     ax2 = fig.add_subplot(132, xlim=[0, 1.01e-5], ylim=[0, 1.01e-5], xlabel='D_vort', ylabel='D_n', title='(D_vort, D_n) plane')
     ax3 = fig.add_subplot(133, xlim=[0.24, 0.76], ylim=[0.025, 0.155], xlabel='height', ylabel='width', title='(height, width) plane')
-    #ax3 = fig.add_subplot(133, xlim=[-0.05, 1.05], ylim=[-0.05, 1.05], xlabel='x19', ylabel='x20', title='(x19, x20) plane')
     
     accepted_grid = sampler.generate_grid(analysis.l_norm)
     ax1.plot(accepted_grid[:,0], accepted_grid[:,1], 'o')
@@ -205,6 +206,32 @@ def plot_sampling(sampler, analysis):
     ax3.plot(accepted_grid[:,4], accepted_grid[:,5], 'o')
     
     plt.tight_layout()
+    plt.show()
+
+def TWsurrogate(QoI, T, W, analysis):
+    """
+    The surrogate model for fixed default values of n0, D_vort, D_n & height
+    """
+    
+    return analysis.surrogate(QoI, np.array([T, 2e+18, 1e-06, 1e-06, 0.5, W]))
+
+def VX_on_TW(QoI, analysis):
+    """
+    Plot a QoI as it varies on Te0 & width
+    """
+    
+    fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
+    
+    T = np.arange(2.5, 7.5, 0.25)
+    W = np.arange(0.03, 0.15, 0.006)
+    T, W = np.meshgrid(T, W)
+    
+    Z = np.zeros((20, 20))
+    for t in range(len(T)):
+        for w in range(len(W)):
+            Z[t][w] = TWsurrogate(QoI, T[t][w], W[t][w], analysis)
+    
+    surf = ax.plot_surface(T, W, Z, cmap=cm.coolwarm, linewidth=0, antialiased=False)
     plt.show()
             
 ###############################################################################
@@ -329,7 +356,6 @@ def get_analysis(campaign, sampler, output_columns):
     Creates, saves and returns the analysis class which will be used on the campaign
     """
     
-    
     frame = campaign.get_collation_result()
     analysis = uq.analysis.SCAnalysis(sampler=sampler, qoi_cols=output_columns)
     campaign.apply_analysis(analysis)
@@ -385,7 +411,8 @@ def analyse_campaign(campaign, sampler, analysis, output_columns):
     #print(analysis.l_norm)
     #print(analysis.get_adaptation_errors())
 
-    #print("Surrogate: ", analysis.surrogate("avgTransp", np.array([7.5e+00, 2.5e+18, 5.05e-06, 5.05e-06, 5.0e-01, 3.4567228e-02])))
+    print("Surrogate: ", analysis.surrogate("maxV", np.array([7.5e+00, 2.5e+18, 5.05e-06, 5.05e-06, 5.0e-01, 3.4567228e-02])))
+    print("Surrogate: ", TWsurrogate("maxV", 5, 0.09, analysis))    
     
     # Print mean and variation of quantity and get adaptation errors
     #print(f'Mean transport rate = {results.describe("avgTransp", "mean")}')
@@ -395,14 +422,20 @@ def analyse_campaign(campaign, sampler, analysis, output_columns):
     #analysis.get_adaptation_errors()
     
     # Get Sobol indices (online for loop automatically creates a list without having to append)
-    params = sampler.vary.get_keys()# This is also used in plot_sobols
+    #params = sampler.vary.get_keys()# This is also used in plot_sobols
     #sobols = [results._get_sobols_first('maxV', param) for param in params]
-    sobols = analysis.get_sobol_indices('maxX')#, typ='all')
-    pprint(sobols)
+    #sobols1 = analysis.get_sobol_indices('maxV')#, typ='all')
+    #pprint(sobols1)
+    #sobols2 = analysis.get_sobol_indices('maxX')
+    #pprint(sobols2)
     
+    # Merge accepted and admissible sets
     analysis.merge_accepted_and_admissible()
     frame = campaign.get_collation_result()
     results = analysis.analyse(frame)
+    
+    VX_on_TW("maxV", analysis)
+    VX_on_TW("maxX", analysis)
     
     # Plot Analysis
     #plot_sampling(sampler, analysis)
@@ -416,7 +449,7 @@ def analyse_campaign(campaign, sampler, analysis, output_columns):
 
 def main():
     params, vary, output_columns, template = define_params()
-    if 1:
+    if 0:
         campaign = setup_campaign(params, output_columns, template)
         sampler = setup_sampler(campaign, vary)
         campaign.execute().collate(progress_bar=True)
