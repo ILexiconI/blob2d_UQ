@@ -147,7 +147,7 @@ def refine_to_precision(campaign, sampler, analysis, param, tol, minrefs, maxref
     """
     Refines the sampling with respect to an output variable until the error on that
     variable is below a certain tolerance.  The error is a sort of normalised 
-    hierarchical surplus error but not the absolute error, calculated by dividing
+    hierarchical surplus error but not the relative error, calculated by dividing
     the largest hierarchical surplus error of the admitted set by the initial value
     of the parameter in question.
     
@@ -195,10 +195,10 @@ def plot_sobols(params, sobols):
     #plt.show()
 
 def plot_sampling(sampler, analysis):
-    fig = plt.figure(figsize=[12,4])
-    ax1 = fig.add_subplot(131, xlim=[2.4, 7.6], ylim=[0.9e+18, 4.1e+18], xlabel='Te0', ylabel='n0', title='(Te0, n0) plane')
-    ax2 = fig.add_subplot(132, xlim=[0, 1.01e-5], ylim=[0, 1.01e-5], xlabel='D_vort', ylabel='D_n', title='(D_vort, D_n) plane')
-    ax3 = fig.add_subplot(133, xlim=[0.24, 0.76], ylim=[0.025, 0.155], xlabel='height', ylabel='width', title='(height, width) plane')
+    fig = plt.figure(figsize=[4,12])
+    ax1 = fig.add_subplot(311, xlim=[2.4, 7.6], ylim=[0.9e+18, 4.1e+18], xlabel='Te0', ylabel='n0', title='(Te0, n0) plane')
+    ax2 = fig.add_subplot(312, xlim=[0, 1.01e-5], ylim=[0, 1.01e-5], xlabel='D_vort', ylabel='D_n', title='(D_vort, D_n) plane')
+    ax3 = fig.add_subplot(313, xlim=[0.24, 0.76], ylim=[0.025, 0.155], xlabel='height', ylabel='width', title='(height, width) plane')
     
     accepted_grid = sampler.generate_grid(analysis.l_norm)
     ax1.plot(accepted_grid[:,0], accepted_grid[:,1], 'o')
@@ -215,9 +215,9 @@ def TWsurrogate(QoI, T, W, analysis):
     
     return analysis.surrogate(QoI, np.array([T, 2e+18, 1e-06, 1e-06, 0.5, W]))
 
-def VX_on_TW(QoI, analysis):
+def plot_on_TW(QoI, analysis):
     """
-    Plot a QoI as it varies on Te0 & width
+    Plot a QoI as it varies on the Te0 & width parameter subspace
     """
     
     fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
@@ -232,8 +232,46 @@ def VX_on_TW(QoI, analysis):
             Z[t][w] = TWsurrogate(QoI, T[t][w], W[t][w], analysis)
     
     surf = ax.plot_surface(T, W, Z, cmap=cm.coolwarm, linewidth=0, antialiased=False)
+    ax.set_xlabel("Te0 (K)")
+    ax.set_ylabel("Blob width (cm)")
+    ax.set_zlabel("CoM Xmax (cm)")
+    if QoI == "maxV": ax.set_zlabel("Max CoM velocity (cm/s)")
+    else: ax.set_zlabel("Blob max displacement (cm)")
+    
     plt.show()
-            
+
+def plot_on_T(QoI, analysis):
+    """
+    Plot a QoI as it varies on the Te0 axis
+    """
+    
+    T = np.arange(2.5, 7.5, 0.25)
+    Z = np.zeros((20))
+    for t in range(len(T)):
+        Z[t] = TWsurrogate(QoI, T[t], 0.09, analysis)
+    
+    plt.plot(T, Z)
+    plt.xlabel("Te0 (K)")
+    if QoI == "maxV": plt.ylabel("Max CoM velocity (cm/s)")
+    else: plt.ylabel("Blob max displacement (cm)")
+    plt.show()
+
+def plot_on_W(QoI, analysis):
+    """
+    Plot a QoI as it varies on the width axis
+    """
+
+    W = np.arange(0.03, 0.15, 0.006)
+    Z = np.zeros((20))
+    for w in range(len(W)):
+        Z[w] = TWsurrogate(QoI, 5, W[w], analysis)
+
+    plt.plot(W, Z)
+    plt.xlabel("Blob width (cm)")
+    if QoI == "maxV": plt.ylabel("Max CoM velocity (cm/s)")
+    else: plt.ylabel("Blob max displacement (cm)")
+    plt.show()
+
 ###############################################################################
 
 def define_params(paramFile=None):
@@ -412,7 +450,8 @@ def analyse_campaign(campaign, sampler, analysis, output_columns):
     #print(analysis.get_adaptation_errors())
 
     print("Surrogate: ", analysis.surrogate("maxV", np.array([7.5e+00, 2.5e+18, 5.05e-06, 5.05e-06, 5.0e-01, 3.4567228e-02])))
-    print("Surrogate: ", TWsurrogate("maxV", 5, 0.09, analysis))    
+    print(analysis.get_adaptation_errors()[-2])
+    print(analysis.get_adaptation_errors()[-2] / analysis.samples["avgTransp"][0])
     
     # Print mean and variation of quantity and get adaptation errors
     #print(f'Mean transport rate = {results.describe("avgTransp", "mean")}')
@@ -424,18 +463,20 @@ def analyse_campaign(campaign, sampler, analysis, output_columns):
     # Get Sobol indices (online for loop automatically creates a list without having to append)
     #params = sampler.vary.get_keys()# This is also used in plot_sobols
     #sobols = [results._get_sobols_first('maxV', param) for param in params]
-    #sobols1 = analysis.get_sobol_indices('maxV')#, typ='all')
+    #sobols1 = analysis.get_sobol_indices('massLoss', typ='all')
     #pprint(sobols1)
-    #sobols2 = analysis.get_sobol_indices('maxX')
-    #pprint(sobols2)
+    #sobols2 = analysis.get_sobol_indices('maxX').values()
+    #pprint(sum(sobols2))
     
     # Merge accepted and admissible sets
     analysis.merge_accepted_and_admissible()
     frame = campaign.get_collation_result()
     results = analysis.analyse(frame)
     
-    VX_on_TW("maxV", analysis)
-    VX_on_TW("maxX", analysis)
+    #plot_on_TW("maxV", analysis)
+    #plot_on_TW("maxX", analysis)
+    plot_on_W("maxV", analysis)
+    plot_on_W("maxX", analysis)
     
     # Plot Analysis
     #plot_sampling(sampler, analysis)
