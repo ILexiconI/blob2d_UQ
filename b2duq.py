@@ -2,11 +2,12 @@
 Runs a dimension adaptive stochastic colocation UQ campaign on the blob2d model
 Should be run with python3 in the same folder as blob2d and a blob2d input template.
 
-Dependencies: easyvvuq-1.2 & xbout-0.3.5.
+Dependencies: a blob2d build, easyvvuq-1.2 & xbout-0.3.5.
 """
 
 import easyvvuq as uq
 import numpy as np
+import scipy.constants as const
 import chaospy as cp
 import os
 import matplotlib.pyplot as plt
@@ -222,21 +223,23 @@ def plot_on_TW(QoI, analysis):
     
     fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
     
-    T = np.arange(2.5, 7.5, 0.25)
-    W = np.arange(0.03, 0.15, 0.006)
+    T = np.arange(2.5, 7.5, 0.05)
+    W = np.arange(0.03, 0.15, 0.0012)
     T, W = np.meshgrid(T, W)
     
-    Z = np.zeros((20, 20))
+    Z = np.zeros((100, 100))
     for t in range(len(T)):
         for w in range(len(W)):
-            Z[t][w] = TWsurrogate(QoI, T[t][w], W[t][w], analysis)
+            if QoI == "maxV":
+                Z[t][w] = TWsurrogate(QoI, T[t][w], W[t][w], analysis)*np.sqrt(const.e*t/const.m_p)
+            else:
+                Z[t][w] = TWsurrogate(QoI, T[t][w], W[t][w], analysis)*np.sqrt(const.m_p*t/const.e)/0.35
     
     surf = ax.plot_surface(T, W, Z, cmap=cm.coolwarm, linewidth=0, antialiased=False)
-    ax.set_xlabel("Te0 (K)")
-    ax.set_ylabel("Blob width (cm)")
-    ax.set_zlabel("CoM Xmax (cm)")
-    if QoI == "maxV": ax.set_zlabel("Max CoM velocity (cm/s)")
-    else: ax.set_zlabel("Blob max displacement (cm)")
+    ax.set_xlabel("Te0 (eV)")
+    ax.set_ylabel("Blob width (m)")
+    if QoI == "maxV": ax.set_zlabel("Max CoM velocity (m/s)")
+    else: ax.set_zlabel("Blob max displacement (m)")
     
     plt.show()
 
@@ -245,15 +248,18 @@ def plot_on_T(QoI, analysis):
     Plot a QoI as it varies on the Te0 axis
     """
     
-    T = np.arange(2.5, 7.5, 0.25)
+    T = np.arange(2.5, 7.5, 0.05)
     Z = np.zeros((20))
     for t in range(len(T)):
-        Z[t] = TWsurrogate(QoI, T[t], 0.09, analysis)
+        if QoI == "maxV":
+            Z[t] = TWsurrogate(QoI, T[t], 0.09, analysis)*np.sqrt(const.e*t/const.m_p)
+        else:
+            Z[t] = TWsurrogate(QoI, T[t], 0.09, analysis)*np.sqrt(const.m_p*t/const.e)/0.35
     
     plt.plot(T, Z)
-    plt.xlabel("Te0 (K)")
-    if QoI == "maxV": plt.ylabel("Max CoM velocity (cm/s)")
-    else: plt.ylabel("Blob max displacement (cm)")
+    plt.xlabel("Te0 (eV)")
+    if QoI == "maxV": plt.ylabel("Max CoM velocity (m/s)")
+    else: plt.ylabel("Blob max displacement (m)")
     plt.show()
 
 def plot_on_W(QoI, analysis):
@@ -261,15 +267,18 @@ def plot_on_W(QoI, analysis):
     Plot a QoI as it varies on the width axis
     """
 
-    W = np.arange(0.03, 0.15, 0.006)
+    W = np.arange(0.03, 0.15, 0.0012)
     Z = np.zeros((20))
     for w in range(len(W)):
-        Z[w] = TWsurrogate(QoI, 5, W[w], analysis)
+        if QoI == "maxV":
+            Z[w] = TWsurrogate(QoI, 5, W[w], analysis)*np.sqrt(const.e*t/const.m_p)
+        else:
+            Z[w] = TWsurrogate(QoI, 5, W[w], analysis)*np.sqrt(const.m_p*t/const.e)/0.35
 
     plt.plot(W, Z)
-    plt.xlabel("Blob width (cm)")
-    if QoI == "maxV": plt.ylabel("Max CoM velocity (cm/s)")
-    else: plt.ylabel("Blob max displacement (cm)")
+    plt.xlabel("Blob width (m)")
+    if QoI == "maxV": plt.ylabel("Max CoM velocity (m/s)")
+    else: plt.ylabel("Blob max displacement (m)")
     plt.show()
 
 ###############################################################################
@@ -428,6 +437,7 @@ def refine_campaign(campaign, sampler, analysis, output_columns):
 def analyse_campaign(campaign, sampler, analysis, output_columns):
     """
     Runs a set of analyses on a provided campaign, details often change by commit.
+    Currently implements some functions which might be useful when analysing a campaign
     
     Parameters
     ----------
@@ -445,20 +455,11 @@ def analyse_campaign(campaign, sampler, analysis, output_columns):
     frame = campaign.campaign_db.get_results("FullSim", 1, iteration=-1)
     results = analysis.analyse(frame)
         
-    #print(frame)#.to_string())
+    print(frame)#.to_string())
     #print(analysis.l_norm)
-    #print(analysis.get_adaptation_errors())
+    analysis.get_adaptation_errors()
 
-    print("Surrogate: ", analysis.surrogate("maxV", np.array([7.5e+00, 2.5e+18, 5.05e-06, 5.05e-06, 5.0e-01, 3.4567228e-02])))
-    print(analysis.get_adaptation_errors()[-2])
-    print(analysis.get_adaptation_errors()[-2] / analysis.samples["avgTransp"][0])
-    
-    # Print mean and variation of quantity and get adaptation errors
-    #print(f'Mean transport rate = {results.describe("avgTransp", "mean")}')
-    #print(f'Standard deviation = {results.describe("avgTransp", "std")}')
-    #print(f'Mean mass loss = {results.describe("massLoss", "mean")}')
-    #print(f'Standard deviation = {results.describe("massLoss", "std")}')
-    #analysis.get_adaptation_errors()
+    #print("Surrogate: ", analysis.surrogate("maxV", np.array([7.5e+00, 2.5e+18, 5.05e-06, 5.05e-06, 5.0e-01, 3.4567228e-02])))
     
     # Get Sobol indices (online for loop automatically creates a list without having to append)
     #params = sampler.vary.get_keys()# This is also used in plot_sobols
@@ -468,13 +469,21 @@ def analyse_campaign(campaign, sampler, analysis, output_columns):
     #sobols2 = analysis.get_sobol_indices('maxX').values()
     #pprint(sum(sobols2))
     
+    
+    
     # Merge accepted and admissible sets
     analysis.merge_accepted_and_admissible()
     frame = campaign.get_collation_result()
     results = analysis.analyse(frame)
     
-    #plot_on_TW("maxV", analysis)
-    #plot_on_TW("maxX", analysis)
+    # Print a value at some point on the parameter space for a QoI using the surrogate model
+    p = np.array([7.5e+00, 2.5e+18, 5.05e-06, 5.05e-06, 5.0e-01, 3.4567228e-02])
+    print("Surrogate: ", analysis.surrogate("avgTransp", p))
+    
+    plot_on_TW("maxV", analysis)
+    plot_on_TW("maxX", analysis)
+    plot_on_T("maxV", analysis)
+    plot_on_T("maxX", analysis)
     plot_on_W("maxV", analysis)
     plot_on_W("maxX", analysis)
     
