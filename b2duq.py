@@ -180,22 +180,6 @@ def refine_to_precision(campaign, sampler, analysis, param, tol, minrefs, maxref
         print(param, "error: ", error)  
     return counter
 
-def plot_sobols(params, sobols):
-    """
-    Plots a bar chart of the sobol indices for each input parameter
-    """
-    
-    fig = plt.figure()
-    ax = fig.add_subplot(111, title='First-order Sobol indices')
-    ax.bar(range(len(sobols)), height=np.array(sobols).flatten())
-    ax.set_xticks(range(len(sobols)))
-    ax.set_xticklabels(params)
-    ax.set_yscale("log")
-    plt.xticks(rotation=90)
-    plt.tight_layout()
-    plt.savefig("Sobols.png")
-    #plt.show()
-
 def plot_sampling(sampler, analysis):
     """
     Plots the accepted set of a dimension adaptive SC campaign over Te0-n0,
@@ -427,12 +411,12 @@ def get_analysis(campaign, sampler, output_columns):
     
     return analysis
 
-def load_analysis(campaign, sampler, output_columns):
+def load_analysis(campaign, sampler):
     """
     Loads and returns the analysis class from a previous campaign
     """
     
-    analysis = uq.analysis.SCAnalysis(sampler=sampler, qoi_cols=output_columns)
+    analysis = uq.analysis.SCAnalysis(sampler=sampler, qoi_cols=sampler.vary.get_keys())
     analysis.load_state(f"{campaign.campaign_dir}/analysis.state")
     
     return analysis
@@ -448,7 +432,7 @@ def refine_campaign(campaign, sampler, analysis, output_columns):
     campaign.apply_analysis(analysis)
     np.savetxt('refinements.txt', np.asarray([atRefs, mlRefs]))
 
-def analyse_campaign(campaign, sampler, analysis, output_columns):
+def analyse_campaign(campaign, sampler, analysis):
     """
     Runs a set of analyses on a provided campaign, details often change by commit.
     Currently demonstrates use of some functions which might be useful when analysing a campaign
@@ -457,8 +441,6 @@ def analyse_campaign(campaign, sampler, analysis, output_columns):
     ----------
     campaign, sampler & analysis
         Easyvvuq objects containing their respective class info
-    output_columns (dict)
-        List of output quantities under consideration
 
     Returns
     -------
@@ -472,7 +454,7 @@ def analyse_campaign(campaign, sampler, analysis, output_columns):
     #print(analysis.l_norm)
     
     # Show the maximum hierarchical surplus error of the admissible set after each refinement
-    analysis.get_adaptation_errors()    
+    print(analysis.get_adaptation_errors())
     
     # Merge accepted and admissible sets
     analysis.merge_accepted_and_admissible()
@@ -486,17 +468,13 @@ def analyse_campaign(campaign, sampler, analysis, output_columns):
     p = np.array([7.5e+00, 2.5e+18, 5.05e-06, 5.05e-06, 5.0e-01, 3.4567228e-02])
     print("Surrogate: ", analysis.surrogate("avgTransp", p))
     
-    # Get Sobol indices
-    params = sampler.vary.get_keys()
-    sobols = [results._get_sobols_first('maxV', param) for param in params]
-    
     # Show all Sobol indices for massLoss
     sobolsML = analysis.get_sobol_indices('massLoss', typ='all')
     pprint(sobolsML)
     
     # Show first order Sobol indices for maxX
     sobolsMX = analysis.get_sobol_indices('maxX').values()
-    pprint(sum(sobolsMX))
+    pprint(sobolsMX)
     
     # Plots the results used in dissertation
     plot_on_TW("maxV", analysis)
@@ -509,17 +487,18 @@ def analyse_campaign(campaign, sampler, analysis, output_columns):
     # Other plots
     plot_sampling(sampler, analysis)
     analysis.adaptation_table()
-    plot_sobols(params, sobols)
     
     plt.show()
 
 ###############################################################################
 
 def main():
-    params, vary, output_columns, template = define_params()
-    if 0:
+    campaign_name = "FullSim"
+    new_campaign = False
+    if new_campaign:
         # Run a new campaign (takes about a day to run on Pinch with current settings)
-        campaign = setup_campaign("FullSim", params, output_columns, template)
+        params, vary, output_columns, template = define_params()
+        campaign = setup_campaign(campaign_name, params, output_columns, template)
         sampler = setup_sampler(campaign, vary)
         campaign.execute().collate(progress_bar=True)
         analysis = get_analysis(campaign, sampler, output_columns)
@@ -527,16 +506,16 @@ def main():
         analysis.save_state(f"{campaign.campaign_dir}/analysis.state")
     else:
         # Load an old campaign and perform analysis
-        campaign = uq.Campaign(name='FullSim', db_location="sqlite:///" + "outfiles/FullSim99d7jlfm/campaign.db")
+        campaign = uq.Campaign(name=campaign_name, db_location="sqlite:///" + "outfiles/FullSim99d7jlfm/campaign.db")
         sampler = campaign.get_active_sampler()
         campaign.set_sampler(sampler, update=True)
-        analysis = load_analysis(campaign, sampler, output_columns)
+        analysis = load_analysis(campaign, sampler)
         
         # Refine campaign further if neccecary
         #refine_campaign(campaign, sampler, analysis, output_columns)
         #analysis.save_state(f"{campaign.campaign_dir}/analysis.state")
         
-        analyse_campaign(campaign, sampler, analysis, output_columns)
+        analyse_campaign(campaign, sampler, analysis)
     
     print("Campaign run / analysed successfuly")
     print(campaign.campaign_dir)
