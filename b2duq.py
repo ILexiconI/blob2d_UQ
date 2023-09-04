@@ -1,6 +1,7 @@
 """
 Runs a dimension adaptive stochastic colocation UQ campaign on the blob2d model
-Should be run with python3 in the same folder as blob2d and a blob2d input template.
+from BOUT++.  Should be run with python3 in the same folder as blob2d and a
+blob2d input template (found in same github repo as this code).
 
 Dependencies: a blob2d build, easyvvuq-1.2 & xbout-0.3.5.
 """
@@ -12,7 +13,6 @@ import chaospy as cp
 import os
 import matplotlib.pyplot as plt
 from matplotlib import cm
-from matplotlib.ticker import LinearLocator
 from easyvvuq.actions import CreateRunDirectory, Encode, Decode, ExecuteLocal, Actions
 from pprint import pprint
 
@@ -40,8 +40,8 @@ class B2dDecoder:
     
     def peak_reached(self, vels):
         """
-        Returns a boolean describing whether the blob velocity has reached its
-        peak, assuming the velocity grows monotonically up to that point.
+        Returns a boolean describing whether the blob CoM velocity has reached a
+        peak.
         """
         if max(vels) != vels[-1]: return True
         else: return False
@@ -85,8 +85,8 @@ class B2dDecoder:
         avgTransp = float(np.mean(ds["transpRate"][:(list(v_x).index(max(v_x)))+1]))
         massLoss = float(integrated_density[list(v_x).index(max(v_x))] / integrated_density[0])
         peaked = self.peak_reached(list(v_x))
-        
         blobInfo = {"maxV": maxV, "maxX": maxX, "avgTransp": avgTransp, "massLoss": massLoss, "peaked": peaked}
+        
         return blobInfo
     
     def parse_sim_output(self, run_info={}):
@@ -159,7 +159,8 @@ def refine_to_precision(campaign, sampler, analysis, param, tol, minrefs, maxref
     param
         The parameter we are refining with respect to
     tol
-        The maximum desired megnitude of adaptation error we want after refinement
+        The maximum desired normalised error we want after refinement, see
+        dissertation for exact definition
     maxrefs
         Maximum allowed number of refinements
 
@@ -196,6 +197,14 @@ def plot_sobols(params, sobols):
     #plt.show()
 
 def plot_sampling(sampler, analysis):
+    """
+    Plots the accepted set of a dimension adaptive SC campaign over Te0-n0,
+    D_vort-D_n and height-width.  This provides a resonable visualisation of the
+    sampling in 6D space.
+    The assumption that all six variables are included in the parameter space
+    is hardcoded here.
+    """
+    
     fig = plt.figure(figsize=[4,12])
     ax1 = fig.add_subplot(311, xlim=[2.4, 7.6], ylim=[0.9e+18, 4.1e+18], xlabel='Te0', ylabel='n0', title='(Te0, n0) plane')
     ax2 = fig.add_subplot(312, xlim=[0, 1.01e-5], ylim=[0, 1.01e-5], xlabel='D_vort', ylabel='D_n', title='(D_vort, D_n) plane')
@@ -211,14 +220,17 @@ def plot_sampling(sampler, analysis):
 
 def TWsurrogate(QoI, T, W, analysis):
     """
-    The surrogate model for fixed default values of n0, D_vort, D_n & height
+    The surrogate model for a givel QoI given fixed default values of n0,
+    D_vort, D_n & height, i.e. the surrogate of a QoI projected onto a
+    T-W subspace
     """
     
     return analysis.surrogate(QoI, np.array([T, 2e+18, 1e-06, 1e-06, 0.5, W]))
 
 def plot_on_TW(QoI, analysis):
     """
-    Plot a QoI as it varies on the Te0 & width parameter subspace
+    Plot a QoI (either Te0 or maxV in SI units) as it varies on the Te0 & width
+    parameter subspace in 3D for  for default values of the other parameters
     """
     
     fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
@@ -231,11 +243,11 @@ def plot_on_TW(QoI, analysis):
     for t in range(len(T)):
         for w in range(len(W)):
             if QoI == "maxV":
-                Z[t][w] = TWsurrogate(QoI, T[t][w], W[t][w], analysis)*np.sqrt(const.e*t/const.m_p)
+                Z[w][t] = TWsurrogate(QoI, T[w][t], W[w][t], analysis)*np.sqrt(const.e*t/const.m_p)
             else:
-                Z[t][w] = TWsurrogate(QoI, T[t][w], W[t][w], analysis)*np.sqrt(const.m_p*t/const.e)/0.35
+                Z[w][t] = TWsurrogate(QoI, T[w][t], W[w][t], analysis)*np.sqrt(const.m_p*t/const.e)/0.35
     
-    surf = ax.plot_surface(T, W, Z, cmap=cm.coolwarm, linewidth=0, antialiased=False)
+    ax.plot_surface(T, W, Z, cmap=cm.coolwarm, linewidth=0, antialiased=False)
     ax.set_xlabel("Te0 (eV)")
     ax.set_ylabel("Blob width (m)")
     if QoI == "maxV": ax.set_zlabel("Max CoM velocity (m/s)")
@@ -245,11 +257,12 @@ def plot_on_TW(QoI, analysis):
 
 def plot_on_T(QoI, analysis):
     """
-    Plot a QoI as it varies on the Te0 axis
+    Plot a QoI (either Te0 or maxV in SI units) as it varies on the Te0 axis for
+    default values of the other parameters
     """
     
     T = np.arange(2.5, 7.5, 0.05)
-    Z = np.zeros((20))
+    Z = np.zeros((100))
     for t in range(len(T)):
         if QoI == "maxV":
             Z[t] = TWsurrogate(QoI, T[t], 0.09, analysis)*np.sqrt(const.e*t/const.m_p)
@@ -264,16 +277,17 @@ def plot_on_T(QoI, analysis):
 
 def plot_on_W(QoI, analysis):
     """
-    Plot a QoI as it varies on the width axis
+    Plot a QoI (either Te0 or maxV in SI units) as it varies on the width axis
+    for default values of the other parameters
     """
 
     W = np.arange(0.03, 0.15, 0.0012)
-    Z = np.zeros((20))
+    Z = np.zeros((100))
     for w in range(len(W)):
         if QoI == "maxV":
-            Z[w] = TWsurrogate(QoI, 5, W[w], analysis)*np.sqrt(const.e*t/const.m_p)
+            Z[w] = TWsurrogate(QoI, 5, W[w], analysis)*np.sqrt(const.e*5/const.m_p)
         else:
-            Z[w] = TWsurrogate(QoI, 5, W[w], analysis)*np.sqrt(const.m_p*t/const.e)/0.35
+            Z[w] = TWsurrogate(QoI, 5, W[w], analysis)*np.sqrt(const.m_p*5/const.e)/0.35
 
     plt.plot(W, Z)
     plt.xlabel("Blob width (m)")
@@ -334,7 +348,7 @@ def define_params(paramFile=None):
         #return params, vary, output_columns, template
         pass
 
-def setup_campaign(params, output_columns, template):
+def setup_campaign(name, params, output_columns, template):
     """
     Builds a campaign using the parameters provided.
 
@@ -359,7 +373,8 @@ def setup_campaign(params, output_columns, template):
             delimiter='$',
             target_filename='BOUT.inp')
     
-    # Create executor - 50+ timesteps should be resonable (higher np?)
+    # Create executor - 60 timesteps in home directory with no verbosity
+    # Nice level is set to run on YPI servers
     execute = ExecuteLocal(f'nice -n 11 mpirun -np 32 {os.getcwd()}/blob2d -d ./ nout=60 -q -q -q')
     
     # Create decoder
@@ -371,7 +386,7 @@ def setup_campaign(params, output_columns, template):
     if os.path.exists('outfiles')==0: os.mkdir('outfiles')
     actions = Actions(CreateRunDirectory('outfiles'), Encode(encoder), execute, Decode(decoder))
     campaign = uq.Campaign(
-            name='FullSim',
+            name=name,
             #db_location="sqlite:///" + os.getcwd() + "/campaign.db",
             work_dir='outfiles',
             params=params,
@@ -409,7 +424,6 @@ def get_analysis(campaign, sampler, output_columns):
     analysis.save_state(f"{campaign.campaign_dir}/analysis.state")
     
     print(frame)
-    print(analysis.l_norm)
     
     return analysis
 
@@ -425,8 +439,8 @@ def load_analysis(campaign, sampler, output_columns):
 
 def refine_campaign(campaign, sampler, analysis, output_columns):
     """
-    Refines a campaign according to hardcoded parameters and saves the number of
-    refinements to a file.
+    Refines a campaign according to hardcoded limits and toleranf and saves the
+    number of refinements to a file
     """
 
     atRefs = refine_to_precision(campaign, sampler, analysis, 'maxV', 0.01, 5, 10)
@@ -437,7 +451,7 @@ def refine_campaign(campaign, sampler, analysis, output_columns):
 def analyse_campaign(campaign, sampler, analysis, output_columns):
     """
     Runs a set of analyses on a provided campaign, details often change by commit.
-    Currently implements some functions which might be useful when analysing a campaign
+    Currently demonstrates use of some functions which might be useful when analysing a campaign
     
     Parameters
     ----------
@@ -448,38 +462,43 @@ def analyse_campaign(campaign, sampler, analysis, output_columns):
 
     Returns
     -------
-    None - results either printed to screen, plotted or saved to a file.
+    None - results either printed to screen, plotted or saved to a file
     """
     
     print("Analysis start")
-    frame = campaign.campaign_db.get_results("FullSim", 1, iteration=-1)
-    results = analysis.analyse(frame)
-        
-    print(frame)#.to_string())
+    #frame = campaign.campaign_db.get_results("FullSim", 1, iteration=-1)
+    #results = analysis.analyse(frame)
+    #pprint(frame)#.to_string())
     #print(analysis.l_norm)
-    analysis.get_adaptation_errors()
-
-    #print("Surrogate: ", analysis.surrogate("maxV", np.array([7.5e+00, 2.5e+18, 5.05e-06, 5.05e-06, 5.0e-01, 3.4567228e-02])))
     
-    # Get Sobol indices (online for loop automatically creates a list without having to append)
-    #params = sampler.vary.get_keys()# This is also used in plot_sobols
-    #sobols = [results._get_sobols_first('maxV', param) for param in params]
-    #sobols1 = analysis.get_sobol_indices('massLoss', typ='all')
-    #pprint(sobols1)
-    #sobols2 = analysis.get_sobol_indices('maxX').values()
-    #pprint(sum(sobols2))
-    
-    
+    # Show the maximum hierarchical surplus error of the admissible set after each refinement
+    analysis.get_adaptation_errors()    
     
     # Merge accepted and admissible sets
     analysis.merge_accepted_and_admissible()
     frame = campaign.get_collation_result()
     results = analysis.analyse(frame)
+
+    # Print the dataframe collated from the campaign object (the values of inputs and outputs at each node)    
+    pprint(frame)
     
     # Print a value at some point on the parameter space for a QoI using the surrogate model
     p = np.array([7.5e+00, 2.5e+18, 5.05e-06, 5.05e-06, 5.0e-01, 3.4567228e-02])
     print("Surrogate: ", analysis.surrogate("avgTransp", p))
     
+    # Get Sobol indices
+    params = sampler.vary.get_keys()
+    sobols = [results._get_sobols_first('maxV', param) for param in params]
+    
+    # Show all Sobol indices for massLoss
+    sobolsML = analysis.get_sobol_indices('massLoss', typ='all')
+    pprint(sobolsML)
+    
+    # Show first order Sobol indices for maxX
+    sobolsMX = analysis.get_sobol_indices('maxX').values()
+    pprint(sum(sobolsMX))
+    
+    # Plots the results used in dissertation
     plot_on_TW("maxV", analysis)
     plot_on_TW("maxX", analysis)
     plot_on_T("maxV", analysis)
@@ -487,26 +506,27 @@ def analyse_campaign(campaign, sampler, analysis, output_columns):
     plot_on_W("maxV", analysis)
     plot_on_W("maxX", analysis)
     
-    # Plot Analysis
-    #plot_sampling(sampler, analysis)
-    #analysis.adaptation_table()
-    #analysis.adaptation_histogram()
-    #analysis.get_adaptation_errors()
-    #plot_sobols(params, sobols)
-    #plt.show()
+    # Other plots
+    plot_sampling(sampler, analysis)
+    analysis.adaptation_table()
+    plot_sobols(params, sobols)
+    
+    plt.show()
 
 ###############################################################################
 
 def main():
     params, vary, output_columns, template = define_params()
     if 0:
-        campaign = setup_campaign(params, output_columns, template)
+        # Run a new campaign (takes about a day to run on Pinch with current settings)
+        campaign = setup_campaign("FullSim", params, output_columns, template)
         sampler = setup_sampler(campaign, vary)
         campaign.execute().collate(progress_bar=True)
         analysis = get_analysis(campaign, sampler, output_columns)
         refine_campaign(campaign, sampler, analysis, output_columns)
         analysis.save_state(f"{campaign.campaign_dir}/analysis.state")
     else:
+        # Load an old campaign and perform analysis
         campaign = uq.Campaign(name='FullSim', db_location="sqlite:///" + "outfiles/FullSim99d7jlfm/campaign.db")
         sampler = campaign.get_active_sampler()
         campaign.set_sampler(sampler, update=True)
@@ -515,10 +535,10 @@ def main():
         # Refine campaign further if neccecary
         #refine_campaign(campaign, sampler, analysis, output_columns)
         #analysis.save_state(f"{campaign.campaign_dir}/analysis.state")
+        
+        analyse_campaign(campaign, sampler, analysis, output_columns)
     
-    analyse_campaign(campaign, sampler, analysis, output_columns)
-    
-    print("Campaign run & analysed successfuly")
+    print("Campaign run / analysed successfuly")
     print(campaign.campaign_dir)
 
 if __name__ == "__main__":
